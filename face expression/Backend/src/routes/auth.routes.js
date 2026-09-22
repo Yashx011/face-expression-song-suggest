@@ -10,3 +10,4 @@ router.get("/get-me" , authMiddleware,authController.getMe)
 router.get("/logout",authMiddleware,authController.logoutUser)
 
 module.exports = router
+
