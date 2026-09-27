@@ -1,0 +1,309 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* ─── Purple Glossy Full-Width Bottom Music Player ─── */
+.player {
+  --player-bg: rgba(15, 10, 26, 0.88);
+  --player-glass-border: rgba(192, 132, 252, 0.22);
+  --player-glass-glow: rgba(168, 85, 247, 0.25);
+  --player-text: #f3e8ff;
+  --player-text-muted: #a855f7;
+  --player-accent-grad: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  --player-progress-fill: linear-gradient(90deg, #c084fc, #e879f9);
+  --player-hover: rgba(192, 132, 252, 0.15);
+
+  font-family: 'Inter', sans-serif;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 84px;
+  box-sizing: border-box;
+  z-index: 9999;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+
+  /* Glassmorphism Purple Background */
+  background: var(--player-bg);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border-top: 1px solid var(--player-glass-border);
+  box-shadow:
+    0 -10px 40px rgba(0, 0, 0, 0.6),
+    0 -2px 20px var(--player-glass-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: var(--player-text);
+  transition: all 0.3s ease;
+}
+
+/* ─── LEFT SECTION: Artwork + Song Details ─── */
+.player__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 240px;
+  max-width: 320px;
+}
+
+.player__artwork-container {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(192, 132, 252, 0.3);
+  background: rgba(30, 20, 50, 0.6);
+}
+
+.player__artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+
+  &:hover {
+    transform: scale(1.08);
+  }
+}
+
+.player__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.player__title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #f3e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+
+.player__mood {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border-radius: 20px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+  border: 1px solid rgba(192, 132, 252, 0.3);
+  text-transform: capitalize;
+  letter-spacing: 0.03em;
+}
+
+/* ─── CENTER SECTION: Controls + Timeline ─── */
+.player__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  max-width: 580px;
+  padding: 0 20px;
+}
+
+.player__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.player__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover {
+    color: #c084fc;
+    background: var(--player-hover);
+    transform: scale(1.1);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.player__btn--play {
+  width: 44px;
+  height: 44px;
+  background: var(--player-accent-grad);
+  color: #ffffff;
+  box-shadow:
+    0 4px 18px rgba(168, 85, 247, 0.5),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+
+  svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  &:hover {
+    color: #fff;
+    background: linear-gradient(135deg, #c084fc 0%, #9333ea 100%);
+    box-shadow: 0 6px 24px rgba(168, 85, 247, 0.8);
+    transform: scale(1.08);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+/* ─── Progress Timeline ─── */
+.player__progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.player__progress-bar {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 100px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: height 0.2s ease;
+
+  &:hover {
+    height: 7px;
+  }
+}
+
+.player__progress-fill {
+  height: 100%;
+  background: var(--player-progress-fill);
+  border-radius: 100px;
+  position: relative;
+  transition: width 0.1s linear;
+}
+
+.player__time {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  margin-top: -2px;
+}
+
+/* ─── RIGHT SECTION: Volume Controls ─── */
+.player__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 180px;
+}
+
+.player__volume-btn {
+  background: transparent;
+  border: none;
+  color: #a855f7;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.2s ease;
+
+  svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  &:hover {
+    color: #e879f9;
+  }
+}
+
+.player__volume-slider {
+  width: 90px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 100px;
+  outline: none;
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #c084fc;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #c084fc;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+
+  &::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+}
+
+/* ─── Loading State ─── */
+.player--loading {
+  opacity: 0.8;
+  .player__artwork {
+    animation: playerPulse 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes playerPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ─── Responsive Adjustments ─── */
+@media (max-width: 768px) {
+  .player {
+    padding: 0 16px;
+    height: 76px;
+  }
+
+  .player__left {
+    min-width: 140px;
+  }
+
+  .player__right {
+    min-width: 80px;
+
+    .player__volume-slider {
+      display: none;
+    }
+  }
+}

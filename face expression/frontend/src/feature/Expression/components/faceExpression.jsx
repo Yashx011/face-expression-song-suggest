@@ -1,13 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import {init, detect} from "../utils/utils";
 
-export default function FaceExpression() {
+export default function FaceExpression({ onExpressionDetected }) {
   const videoRef = useRef(null);
   const landmarkerRef = useRef(null);
   const animationRef = useRef(null);
   const streamRef = useRef(null);
 
   const [expression, setExpression] = useState("Detecting...");
+
+  /* Map display expression to API mood string */
+  useEffect(() => {
+    if (!onExpressionDetected) return;
+
+    let mood = null;
+    if (expression.includes("Happy")) mood = "happy"
+    else if (expression.includes("Sad")) mood = "sad"
+    else if (expression.includes("Surprised")) mood = "surprised"
+
+    if (mood) {
+      onExpressionDetected(mood);
+    }
+  }, [expression]);
 
   useEffect(() => {
   
