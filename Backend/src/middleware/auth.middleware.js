@@ -25,5 +25,28 @@ async function authUser(req, res, next) {
 
 }
 
+async function authUserOptional(req, res, next) {
+    const token = req.cookies.token;
+    if (!token) {
+        req.user = null;
+        return next();
+    }
+    try {
+        const blackListedToken = await redis.get(token);
+        if (blackListedToken) {
+            req.user = null;
+            return next();
+        }
+        const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decodedToken;
+        next();
+    } catch (error) {
+        req.user = null;
+        return next();
+    }
+}
 
-module.exports = authUser
+module.exports = {
+    authUser,
+    authUserOptional
+};
