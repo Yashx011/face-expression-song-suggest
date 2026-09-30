@@ -1,8 +1,10 @@
 import { useContext, useRef, useState, useEffect, useCallback } from "react";
 import { SongContext } from "../songContext";
+import useAuth from "../../auth/hook/useAuth";
+import { getInteractionStatus, toggleLikeSong, toggleDislikeSong, toggleSaveSong } from "../services/song.api";
 import "./player.scss";
 
-/* ─── SVG Icons (inline to avoid external deps) ─── */
+/* ─── SVG Icons ─── */
 const IconPlay = () => (
   <svg viewBox="0 0 24 24" fill="currentColor">
     <path d="M8 5.14v14l11-7-11-7z" />
@@ -55,7 +57,49 @@ const IconVolumeMute = () => (
   </svg>
 );
 
-/* ─── Helpers ─── */
+const IconHeartOutline = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l8.78-8.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+  </svg>
+);
+
+const IconHeartFilled = () => (
+  <svg viewBox="0 0 24 24" fill="#e879f9" stroke="#e879f9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l8.78-8.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+  </svg>
+);
+
+const IconDislikeOutline = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4.33v6.34A2.31 2.31 0 0 1 19.67 13H17" />
+  </svg>
+);
+
+const IconDislikeFilled = () => (
+  <svg viewBox="0 0 24 24" fill="#f87171" stroke="#f87171" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4.33v6.34A2.31 2.31 0 0 1 19.67 13H17" />
+  </svg>
+);
+
+const IconBookmarkOutline = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+const IconBookmarkFilled = () => (
+  <svg viewBox="0 0 24 24" fill="#fbbf24" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+const MOOD_EMOJIS = {
+  happy: "😊",
+  sad: "😢",
+  neutral: "😐",
+  surprised: "😮"
+};
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return "0:00";
   const mins = Math.floor(seconds / 60);
@@ -63,12 +107,13 @@ function formatTime(seconds) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-/* ─── Player Component ─── */
-export default function Player() {
-  const { song, loading } = useContext(SongContext);
+export default function Player({ onSkip }) {
+  const { song, setSong, queue, loading } = useContext(SongContext);
+  const { user } = useAuth();
 
   const audioRef = useRef(null);
   const progressRef = useRef(null);
+  const expandedProgressRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -76,22 +121,57 @@ export default function Player() {
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
 
-  /* ── Sync audio source when song changes ── */
-  // Change lines 80-86 in player.jsx to:
-useEffect(() => {
-  if (audioRef.current && song?.url) {
-    audioRef.current.load();
-    // 🎵 Autoplay as soon as the song url updates
-    audioRef.current
-      .play()
-      .then(() => setIsPlaying(true))
-      .catch((err) => console.log("Autoplay prevented by browser:", err));
-    setCurrentTime(0);
-  }
-}, [song?.url]);
+  const [isLiked, setIsLiked] = useState(false);
+  const [isDisliked, setIsDisliked] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  /* ── Play / Pause ── */
-  const togglePlay = useCallback(() => {
+  /* ── Current Queue Index ── */
+  const currentIndex = queue && song ? queue.findIndex((s) => s._id === song._id) : -1;
+
+  /* ── Sync audio source when song changes ── */
+  useEffect(() => {
+    if (audioRef.current && song?.url) {
+      audioRef.current.load();
+      audioRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch((err) => console.log("Autoplay prevented by browser:", err));
+      setCurrentTime(0);
+    }
+  }, [song?.url]);
+
+  /* ── Sync interaction status when song or user changes ── */
+  useEffect(() => {
+    let isMounted = true;
+    if (user && song?._id) {
+      getInteractionStatus(song._id)
+        .then((res) => {
+          if (isMounted) {
+            setIsLiked(!!res?.isLiked);
+            setIsDisliked(!!res?.isDisliked);
+            setIsSaved(!!res?.isSaved);
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setIsLiked(false);
+            setIsDisliked(false);
+            setIsSaved(false);
+          }
+        });
+    } else {
+      setIsLiked(false);
+      setIsDisliked(false);
+      setIsSaved(false);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [song?._id, user]);
+
+  const togglePlay = useCallback((e) => {
+    if (e) e.stopPropagation();
     const audio = audioRef.current;
     if (!audio) return;
     if (isPlaying) {
@@ -102,34 +182,114 @@ useEffect(() => {
     setIsPlaying(!isPlaying);
   }, [isPlaying]);
 
-  /* ── Skip Forward / Backward 5s ── */
-  const skipForward = useCallback(() => {
+  /* ── Toggle Like ── */
+  const handleToggleLike = useCallback(async (e) => {
+    if (e) e.stopPropagation();
+    if (!song?._id) return;
+    if (!user) {
+      alert("Please log in to like songs");
+      return;
+    }
+    const prevLiked = isLiked;
+    setIsLiked(!prevLiked);
+    if (!prevLiked) setIsDisliked(false);
+
+    try {
+      const res = await toggleLikeSong(song._id);
+      setIsLiked(!!res?.isLiked);
+      setIsDisliked(!!res?.isDisliked);
+    } catch (err) {
+      console.error("Failed to toggle like:", err);
+      setIsLiked(prevLiked);
+    }
+  }, [song?._id, user, isLiked]);
+
+  /* ── Toggle Dislike ── */
+  const handleToggleDislike = useCallback(async (e) => {
+    if (e) e.stopPropagation();
+    if (!song?._id) return;
+    if (!user) {
+      alert("Please log in to dislike songs");
+      return;
+    }
+    const prevDisliked = isDisliked;
+    setIsDisliked(!prevDisliked);
+    if (!prevDisliked) setIsLiked(false);
+
+    try {
+      const res = await toggleDislikeSong(song._id);
+      setIsDisliked(!!res?.isDisliked);
+      setIsLiked(!!res?.isLiked);
+    } catch (err) {
+      console.error("Failed to toggle dislike:", err);
+      setIsDisliked(prevDisliked);
+    }
+  }, [song?._id, user, isDisliked]);
+
+  /* ── Toggle Save ── */
+  const handleToggleSave = useCallback(async (e) => {
+    if (e) e.stopPropagation();
+    if (!song?._id) return;
+    if (!user) {
+      alert("Please log in to save songs");
+      return;
+    }
+    const prevSaved = isSaved;
+    setIsSaved(!prevSaved);
+    try {
+      const res = await toggleSaveSong(song._id);
+      setIsSaved(!!res?.isSaved);
+    } catch (err) {
+      console.error("Failed to toggle save:", err);
+      setIsSaved(prevSaved);
+    }
+  }, [song?._id, user, isSaved]);
+
+  /* ── Next Song in Queue ── */
+  const handleNextTrack = useCallback((e) => {
+    if (e) e.stopPropagation();
+    if (queue && queue.length > 0 && currentIndex !== -1) {
+      const nextIdx = (currentIndex + 1) % queue.length;
+      setSong(queue[nextIdx]);
+    } else if (onSkip) {
+      onSkip();
+    }
+  }, [queue, currentIndex, setSong, onSkip]);
+
+  /* ── Previous Song in Queue ── */
+  const handlePrevTrack = useCallback((e) => {
+    if (e) e.stopPropagation();
+    const audio = audioRef.current;
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      return;
+    }
+    if (queue && queue.length > 0 && currentIndex > 0) {
+      setSong(queue[currentIndex - 1]);
+    } else if (audio) {
+      audio.currentTime = 0;
+    }
+  }, [queue, currentIndex, setSong]);
+
+  const skipForward = useCallback((e) => {
+    if (e) e.stopPropagation();
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = Math.min(audio.currentTime + 5, audio.duration || 0);
   }, []);
 
-  const skipBackward = useCallback(() => {
+  const skipBackward = useCallback((e) => {
+    if (e) e.stopPropagation();
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = Math.max(audio.currentTime - 5, 0);
   }, []);
 
-  /* ── Jump to start / end ── */
-  const jumpToStart = useCallback(() => {
-    if (audioRef.current) audioRef.current.currentTime = 0;
-  }, []);
-
-  const jumpToEnd = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio && audio.duration) audio.currentTime = audio.duration;
-  }, []);
-
-  /* ── Progress bar click ── */
   const handleProgressClick = useCallback(
-    (e) => {
+    (e, targetRef) => {
+      if (e) e.stopPropagation();
       const audio = audioRef.current;
-      const bar = progressRef.current;
+      const bar = targetRef ? targetRef.current : progressRef.current;
       if (!audio || !bar || !duration) return;
       const rect = bar.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
@@ -139,15 +299,16 @@ useEffect(() => {
     [duration]
   );
 
-  /* ── Volume ── */
   const handleVolumeChange = useCallback((e) => {
+    if (e) e.stopPropagation();
     const val = parseFloat(e.target.value);
     setVolume(val);
     setIsMuted(val === 0);
     if (audioRef.current) audioRef.current.volume = val;
   }, []);
 
-  const toggleMute = useCallback(() => {
+  const toggleMute = useCallback((e) => {
+    if (e) e.stopPropagation();
     const audio = audioRef.current;
     if (!audio) return;
     if (isMuted) {
@@ -159,7 +320,6 @@ useEffect(() => {
     }
   }, [isMuted, volume]);
 
-  /* ── Audio event handlers ── */
   const onTimeUpdate = useCallback(() => {
     if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
   }, []);
@@ -168,18 +328,30 @@ useEffect(() => {
     if (audioRef.current) setDuration(audioRef.current.duration);
   }, []);
 
+  /* ── AUTO-NEXT: Automatically play next song in queue when track ends ── */
   const onEnded = useCallback(() => {
     setIsPlaying(false);
     setCurrentTime(0);
-  }, []);
+    if (queue && queue.length > 0 && currentIndex !== -1) {
+      const nextIdx = (currentIndex + 1) % queue.length;
+      setSong(queue[nextIdx]);
+    } else if (onSkip) {
+      onSkip();
+    }
+  }, [queue, currentIndex, setSong, onSkip]);
 
-  /* ── Progress percentage ── */
+  const handlePlayerClick = () => {
+    if (song?.url) {
+      setIsExpanded(true);
+    }
+  };
+
   const progressPct = duration ? (currentTime / duration) * 100 : 0;
 
-  /* ── No song loaded ── */
   if (!song?.url) {
     return (
       <div className={`player ${loading ? "player--loading" : ""}`}>
+        <audio ref={audioRef} />
         <div className="player__left">
           <div className="player__artwork-container">
             <div
@@ -200,73 +372,235 @@ useEffect(() => {
     );
   }
 
-    return (
-    <div className={`player ${loading ? "player--loading" : ""}`}>
-      {/* Audio Element */}
-      <audio
-        ref={audioRef}
-        src={song.url}
-        preload="metadata"
-        onTimeUpdate={onTimeUpdate}
-        onLoadedMetadata={onLoadedMetadata}
-        onEnded={onEnded}
-      />
+  return (
+    <>
+      {/* Mini Bottom Player */}
+      <div
+        className={`player ${loading ? "player--loading" : ""}`}
+        onClick={handlePlayerClick}
+      >
+        <audio
+          ref={audioRef}
+          src={song.url}
+          preload="metadata"
+          onTimeUpdate={onTimeUpdate}
+          onLoadedMetadata={onLoadedMetadata}
+          onEnded={onEnded}
+        />
 
-      {/* LEFT SECTION: Poster & Info */}
-      <div className="player__left">
-        <div className="player__artwork-container">
-          <img
-            className="player__artwork"
-            src={song.posterUrl}
-            alt={song.title}
+        {/* LEFT SECTION */}
+        <div className="player__left" onClick={(e) => e.stopPropagation()}>
+          <div className="player__artwork-container" onClick={() => setIsExpanded(true)}>
+            <img className="player__artwork" src={song.posterUrl} alt={song.title} />
+          </div>
+          <div className="player__info" onClick={() => setIsExpanded(true)}>
+            <span className="player__title">{song.title}</span>
+            <span className="player__mood">{song.mood}</span>
+          </div>
+
+          <div className="player__actions">
+            <button
+              className={`player__action-btn ${isLiked ? "active-like" : ""}`}
+              onClick={handleToggleLike}
+              title="Like"
+            >
+              {isLiked ? <IconHeartFilled /> : <IconHeartOutline />}
+            </button>
+
+            <button
+              className={`player__action-btn ${isDisliked ? "active-dislike" : ""}`}
+              onClick={handleToggleDislike}
+              title="Dislike"
+            >
+              {isDisliked ? <IconDislikeFilled /> : <IconDislikeOutline />}
+            </button>
+
+            <button
+              className={`player__action-btn ${isSaved ? "active-save" : ""}`}
+              onClick={handleToggleSave}
+              title="Save"
+            >
+              {isSaved ? <IconBookmarkFilled /> : <IconBookmarkOutline />}
+            </button>
+          </div>
+        </div>
+
+        {/* CENTER SECTION */}
+        <div className="player__center" onClick={(e) => e.stopPropagation()}>
+          <div className="player__controls">
+            <button className="player__btn" onClick={handlePrevTrack} title="Previous">
+              <IconSkipBack />
+            </button>
+            <button className="player__btn" onClick={skipBackward} title="Rewind 5s">
+              <IconRewind5 />
+            </button>
+            <button className="player__btn player__btn--play" onClick={togglePlay} title={isPlaying ? "Pause" : "Play"}>
+              {isPlaying ? <IconPause /> : <IconPlay />}
+            </button>
+            <button className="player__btn" onClick={skipForward} title="Forward 5s">
+              <IconForward5 />
+            </button>
+            <button className="player__btn" onClick={handleNextTrack} title="Next">
+              <IconSkipForward />
+            </button>
+          </div>
+
+          <div className="player__progress">
+            <div
+              className="player__progress-bar"
+              ref={progressRef}
+              onClick={(e) => handleProgressClick(e, progressRef)}
+            >
+              <div className="player__progress-fill" style={{ width: `${progressPct}%` }} />
+            </div>
+            <div className="player__time">
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(duration)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT SECTION */}
+        <div className="player__right" onClick={(e) => e.stopPropagation()}>
+          <button className="player__volume-btn" onClick={toggleMute} title={isMuted ? "Unmute" : "Mute"}>
+            {isMuted ? <IconVolumeMute /> : <IconVolume />}
+          </button>
+          <input
+            className="player__volume-slider"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={isMuted ? 0 : volume}
+            onChange={handleVolumeChange}
+            title="Volume"
           />
         </div>
-        <div className="player__info">
-          <span className="player__title">{song.title}</span>
-          <span className="player__mood">{song.mood}</span>
-        </div>
       </div>
 
-      {/* CENTER SECTION: Controls & Timeline */}
-      <div className="player__center">
-        <div className="player__controls">
-          <button className="player__btn" onClick={skipBackward} title="Rewind 5s">
-            <IconRewind5 />
-          </button>
-          <button className="player__btn player__btn--play" onClick={togglePlay}>
-            {isPlaying ? <IconPause /> : <IconPlay />}
-          </button>
-          <button className="player__btn" onClick={skipForward} title="Forward 5s">
-            <IconForward5 />
-          </button>
-        </div>
-        <div className="player__progress">
-          <div className="player__progress-bar" ref={progressRef} onClick={handleProgressClick}>
-            <div className="player__progress-fill" style={{ width: `${progressPct}%` }} />
-          </div>
-          <div className="player__time">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
-          </div>
-        </div>
-      </div>
+      {/* Expanded Now Playing Overlay */}
+      {isExpanded && (
+        <div className="player-overlay">
+          <header className="player-overlay__header">
+            <button
+              className="close-btn"
+              onClick={() => setIsExpanded(false)}
+              title="Close"
+            >
+              ✕
+            </button>
+            <span className="now-playing-label">Now Playing</span>
+            <div style={{ width: 42 }} />
+          </header>
 
-      {/* RIGHT SECTION: Volume */}
-      <div className="player__right">
-        <button className="player__volume-btn" onClick={toggleMute}>
-          {isMuted ? <IconVolumeMute /> : <IconVolume />}
-        </button>
-        <input
-          className="player__volume-slider"
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={isMuted ? 0 : volume}
-          onChange={handleVolumeChange}
-        />
-      </div>
-    </div>
+          <main className="player-overlay__body">
+            <div className="player-overlay__artwork-wrapper">
+              <img src={song.posterUrl} alt={song.title} />
+            </div>
+
+            <div className="player-overlay__meta">
+              <h2 className="track-title">{song.title}</h2>
+              <span className="track-mood">
+                <span>{MOOD_EMOJIS[song.mood?.toLowerCase()] || "🎵"}</span>
+                <span>{song.mood}</span>
+              </span>
+            </div>
+
+            <div className="player-overlay__progress">
+              <div
+                className="progress-bar-track"
+                ref={expandedProgressRef}
+                onClick={(e) => handleProgressClick(e, expandedProgressRef)}
+              >
+                <div className="progress-bar-fill" style={{ width: `${progressPct}%` }} />
+              </div>
+              <div className="time-indicators">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            <div className="player-overlay__controls">
+              <button className="ctrl-btn" onClick={handlePrevTrack} title="Previous">
+                <IconSkipBack />
+              </button>
+              <button className="ctrl-btn" onClick={skipBackward} title="Rewind 5s">
+                <IconRewind5 />
+              </button>
+              <button className="ctrl-btn ctrl-btn--play" onClick={togglePlay} title={isPlaying ? "Pause" : "Play"}>
+                {isPlaying ? <IconPause /> : <IconPlay />}
+              </button>
+              <button className="ctrl-btn" onClick={skipForward} title="Forward 5s">
+                <IconForward5 />
+              </button>
+              <button className="ctrl-btn" onClick={handleNextTrack} title="Next">
+                <IconSkipForward />
+              </button>
+            </div>
+
+            {/* Queue UI */}
+            {queue && queue.length > 0 && (
+              <div className="player-overlay__queue">
+                <div className="queue-header">
+                  <span>Queue ({queue.length})</span>
+                  <span>{song.mood} mood</span>
+                </div>
+                <div className="queue-list">
+                  {queue.map((item) => {
+                    const isActive = item._id === song._id;
+                    return (
+                      <div
+                        key={item._id}
+                        className={`queue-item ${isActive ? "active-queue-item" : ""}`}
+                        onClick={() => setSong(item)}
+                      >
+                        <img
+                          className="queue-item__poster"
+                          src={item.posterUrl || "https://via.placeholder.com/150"}
+                          alt={item.title}
+                        />
+                        <div className="queue-item__info">
+                          <span className="queue-item__title">{item.title}</span>
+                          <span className="queue-item__mood">
+                            {MOOD_EMOJIS[item.mood?.toLowerCase()]} {item.mood}
+                          </span>
+                        </div>
+                        {isActive && <span className="queue-item__indicator">▶ Playing</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </main>
+
+          <footer className="player-overlay__footer">
+            <button
+              className={`player__action-btn ${isLiked ? "active-like" : ""}`}
+              onClick={handleToggleLike}
+              title="Like"
+            >
+              {isLiked ? <IconHeartFilled /> : <IconHeartOutline />}
+            </button>
+
+            <button
+              className={`player__action-btn ${isDisliked ? "active-dislike" : ""}`}
+              onClick={handleToggleDislike}
+              title="Dislike"
+            >
+              {isDisliked ? <IconDislikeFilled /> : <IconDislikeOutline />}
+            </button>
+
+            <button
+              className={`player__action-btn ${isSaved ? "active-save" : ""}`}
+              onClick={handleToggleSave}
+              title="Save"
+            >
+              {isSaved ? <IconBookmarkFilled /> : <IconBookmarkOutline />}
+            </button>
+          </footer>
+        </div>
+      )}
+    </>
   );
-
 }

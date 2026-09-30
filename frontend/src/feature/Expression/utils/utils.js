@@ -33,15 +33,19 @@ export const init = async ({ landmarkerRef, videoRef, streamRef }) => {
       }
     };
 
-    export const detect = ({landmarkerRef, videoRef , setExpression}) => {
-      if (!landmarkerRef.current || !videoRef.current) return;
+    export const detect = ({landmarkerRef, videoRef , setExpression, setConfidence, setDetectionStatus}) => {
+      if (!landmarkerRef.current || !videoRef.current) {
+        if (setDetectionStatus) setDetectionStatus("error");
+        return { status: "error" };
+      }
 
       if (
         videoRef.current.readyState < 2 ||
         videoRef.current.videoWidth === 0 ||
         videoRef.current.videoHeight === 0
       ) {
-        return;
+        if (setDetectionStatus) setDetectionStatus("error");
+        return { status: "error" };
       }
 
       try {
@@ -78,27 +82,58 @@ export const init = async ({ landmarkerRef, videoRef, streamRef }) => {
             getScore("mouthFrownRight");
 
           let currentExpression = "Neutral";
+          let rawConfidence = 0;
 
           if (
             smileLeft > 0.3 &&
             smileRight > 0
           ) {
             currentExpression = "Happy 😊";
+            rawConfidence = ((smileLeft + smileRight) / 1.5) * 100;
           } else if (
             jawOpen > 0.2 &&
             browUp > 0.2
           ) {
             currentExpression = "Surprised 😮";
+            rawConfidence = ((jawOpen + browUp) / 1.5) * 100;
           } else if (
             frownLeft > 0.01 &&
             frownRight > 0.01
           ) {
             currentExpression = "Sad 😢";
+            rawConfidence = ((frownLeft + frownRight) / 0.5) * 100;
+          } else {
+            const happyIntensity = (smileLeft + smileRight) / 1.5;
+            const surprisedIntensity = (jawOpen + browUp) / 1.5;
+            const sadIntensity = (frownLeft + frownRight) / 0.5;
+            const maxExpressionIntensity = Math.max(happyIntensity, surprisedIntensity, sadIntensity);
+            rawConfidence = (1 - maxExpressionIntensity) * 100;
           }
 
-          setExpression(currentExpression);
+          const confidence = Math.min(100, Math.max(0, Math.round(rawConfidence)));
+
+          if (setExpression) {
+            setExpression(currentExpression);
+          }
+          if (setConfidence) {
+            setConfidence(confidence);
+          }
+          if (setDetectionStatus) {
+            setDetectionStatus("detected");
+          }
+
+          return { expression: currentExpression, confidence, status: "detected" };
+        } else {
+          if (setDetectionStatus) {
+            setDetectionStatus("no-face");
+          }
+          return { status: "no-face" };
         }
       } catch (error) {
         console.log(error);
+        if (setDetectionStatus) {
+          setDetectionStatus("error");
+        }
+        return { status: "error" };
       }
     };

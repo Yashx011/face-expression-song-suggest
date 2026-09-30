@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router'
-// import EditProfile from '../components/EditProfile'
+import EditProfile from '../components/EditProfile'
 import '../style/profile.scss'
 
 const EditProfilePage = () => {
