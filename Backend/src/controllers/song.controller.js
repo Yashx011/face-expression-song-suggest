@@ -6,6 +6,7 @@ const Save = require("../models/save.model");
 const ListeningHistory = require("../models/history.model");
 const NodeID3 = require("node-id3");
 const songStorage = require("../services/storage.service");
+const recommendationService = require("../services/recommendation.service");
 
 async function uploadSong(req, res) {
     const songBuffer = req.file.buffer;
@@ -44,31 +45,25 @@ async function getSong(req, res) {
             return res.status(400).json({ message: "Mood is required" });
         }
 
-        const query = { mood: mood.toLowerCase() };
-        if (exclude && mongoose.Types.ObjectId.isValid(exclude)) {
-            query._id = { $ne: exclude };
-        }
+        const userId = req.user ? req.user._id : null;
+        const result = await recommendationService.getPersonalizedRecommendations(mood, userId, exclude);
 
-        const songs = await songModel.find(query);
-
-        if (!songs || songs.length === 0) {
+        if (!result.song) {
             return res.status(200).json({
                 message: exclude ? "No other song found for this mood" : "No song found for this mood",
-                song: null
+                song: null,
+                songs: []
             });
         }
 
-        const randomIndex = Math.floor(Math.random() * songs.length);
-        const song = songs[randomIndex];
-
         return res.status(200).json({
-            message: "song fetched successfully",
-            song,
-            songs
+            message: "Personalized recommendation fetched successfully",
+            song: result.song,
+            songs: result.songs
         });
     } catch (error) {
         return res.status(500).json({
-            message: error.message || "Failed to fetch song",
+            message: error.message || "Failed to fetch recommendation",
             song: null,
             songs: []
         });
