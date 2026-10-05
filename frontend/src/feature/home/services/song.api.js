@@ -14,23 +14,23 @@ export async function getSong(mood, exclude) {
     return response.data;
 }
 
-export async function toggleLikeSong(songId) {
-    const response = await api.post(`/api/song/like/${songId}`);
+export async function toggleLikeSong(songId, songData) {
+    const response = await api.post(`/api/song/like/${encodeURIComponent(songId)}`, songData);
     return response.data;
 }
 
-export async function toggleDislikeSong(songId) {
-    const response = await api.post(`/api/song/dislike/${songId}`);
+export async function toggleDislikeSong(songId, songData) {
+    const response = await api.post(`/api/song/dislike/${encodeURIComponent(songId)}`, songData);
     return response.data;
 }
 
-export async function toggleSaveSong(songId) {
-    const response = await api.post(`/api/song/save/${songId}`);
+export async function toggleSaveSong(songId, songData) {
+    const response = await api.post(`/api/song/save/${encodeURIComponent(songId)}`, songData);
     return response.data;
 }
 
 export async function getInteractionStatus(songId) {
-    const response = await api.get(`/api/song/status/${songId}`);
+    const response = await api.get(`/api/song/status/${encodeURIComponent(songId)}`);
     return response.data;
 }
 

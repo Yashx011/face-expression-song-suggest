@@ -25,6 +25,9 @@ const userSchema = new mongoose.Schema({
     profilePicture: {
         type: String
     },
+    googleProfilePicture: {
+        type: String
+    },
     authProvider: {
         type: String,
         enum: ["local", "google"],

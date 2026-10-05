@@ -72,24 +72,59 @@ async function getSong(req, res) {
 
 /* ───────────────────── LIKE / DISLIKE / SAVE INTERACTIONS ───────────────────── */
 
+async function resolveOrCreateSongId(songId, songData = {}) {
+    if (!songId) return null;
+
+    if (mongoose.Types.ObjectId.isValid(songId)) {
+        const existingById = await songModel.findById(songId);
+        if (existingById) {
+            return existingById._id;
+        }
+    }
+
+    const existing = await songModel.findOne({
+        $or: [
+            { spotifyId: songId },
+            { videoId: songId },
+            { title: songData.title || "" }
+        ]
+    });
+
+    if (existing) {
+        return existing._id;
+    }
+
+    const newSong = await songModel.create({
+        title: songData.title || songId,
+        url: songData.youtubeUrl || songData.url || `https://www.youtube.com/watch?v=${songId}`,
+        posterUrl: songData.posterUrl || songData.albumImage || "https://via.placeholder.com/150",
+        spotifyId: songData.spotifyId || songId,
+        videoId: songData.videoId || songData.youtubeId || songId,
+        mood: songData.mood || "happy"
+    });
+
+    return newSong._id;
+}
+
 async function toggleLike(req, res) {
     try {
         const { songId } = req.params;
         const userId = req.user._id;
 
-        if (!mongoose.Types.ObjectId.isValid(songId)) {
+        const mongoSongId = await resolveOrCreateSongId(songId, req.body);
+        if (!mongoSongId) {
             return res.status(400).json({ message: "Invalid song ID" });
         }
 
-        const existingLike = await Like.findOne({ user: userId, song: songId });
+        const existingLike = await Like.findOne({ user: userId, song: mongoSongId });
 
         if (existingLike) {
             await Like.findByIdAndDelete(existingLike._id);
             return res.status(200).json({ isLiked: false, isDisliked: false, message: "Song unliked" });
         } else {
             // Liking removes any existing dislike (mutually exclusive)
-            await Dislike.deleteMany({ user: userId, song: songId });
-            await Like.create({ user: userId, song: songId });
+            await Dislike.deleteMany({ user: userId, song: mongoSongId });
+            await Like.create({ user: userId, song: mongoSongId });
             return res.status(201).json({ isLiked: true, isDisliked: false, message: "Song liked" });
         }
     } catch (error) {
@@ -102,19 +137,20 @@ async function toggleDislike(req, res) {
         const { songId } = req.params;
         const userId = req.user._id;
 
-        if (!mongoose.Types.ObjectId.isValid(songId)) {
+        const mongoSongId = await resolveOrCreateSongId(songId, req.body);
+        if (!mongoSongId) {
             return res.status(400).json({ message: "Invalid song ID" });
         }
 
-        const existingDislike = await Dislike.findOne({ user: userId, song: songId });
+        const existingDislike = await Dislike.findOne({ user: userId, song: mongoSongId });
 
         if (existingDislike) {
             await Dislike.findByIdAndDelete(existingDislike._id);
             return res.status(200).json({ isDisliked: false, isLiked: false, message: "Dislike removed" });
         } else {
             // Disliking removes any existing like (mutually exclusive)
-            await Like.deleteMany({ user: userId, song: songId });
-            await Dislike.create({ user: userId, song: songId });
+            await Like.deleteMany({ user: userId, song: mongoSongId });
+            await Dislike.create({ user: userId, song: mongoSongId });
             return res.status(201).json({ isDisliked: true, isLiked: false, message: "Song disliked" });
         }
     } catch (error) {
@@ -127,17 +163,18 @@ async function toggleSave(req, res) {
         const { songId } = req.params;
         const userId = req.user._id;
 
-        if (!mongoose.Types.ObjectId.isValid(songId)) {
+        const mongoSongId = await resolveOrCreateSongId(songId, req.body);
+        if (!mongoSongId) {
             return res.status(400).json({ message: "Invalid song ID" });
         }
 
-        const existingSave = await Save.findOne({ user: userId, song: songId });
+        const existingSave = await Save.findOne({ user: userId, song: mongoSongId });
 
         if (existingSave) {
             await Save.findByIdAndDelete(existingSave._id);
             return res.status(200).json({ isSaved: false, message: "Song unsaved" });
         } else {
-            await Save.create({ user: userId, song: songId });
+            await Save.create({ user: userId, song: mongoSongId });
             return res.status(201).json({ isSaved: true, message: "Song saved" });
         }
     } catch (error) {
@@ -150,20 +187,21 @@ async function getInteractionStatus(req, res) {
         const { songId } = req.params;
         const userId = req.user._id;
 
-        if (!mongoose.Types.ObjectId.isValid(songId)) {
-            return res.status(400).json({ message: "Invalid song ID" });
+        const mongoSongId = await resolveOrCreateSongId(songId);
+        if (!mongoSongId) {
+            return res.status(200).json({ isLiked: false, isDisliked: false, isSaved: false });
         }
 
         const [like, dislike, save] = await Promise.all([
-            Like.exists({ user: userId, song: songId }),
-            Dislike.exists({ user: userId, song: songId }),
-            Save.exists({ user: userId, song: songId })
+            Like.exists({ user: userId, song: mongoSongId }),
+            Dislike.exists({ user: userId, song: mongoSongId }),
+            Save.exists({ user: userId, song: mongoSongId })
         ]);
 
         return res.status(200).json({
-            isLiked: !!like,
-            isDisliked: !!dislike,
-            isSaved: !!save
+            isLiked: Boolean(like),
+            isDisliked: Boolean(dislike),
+            isSaved: Boolean(save)
         });
     } catch (error) {
         return res.status(500).json({ message: error.message || "Failed to fetch interaction status" });
