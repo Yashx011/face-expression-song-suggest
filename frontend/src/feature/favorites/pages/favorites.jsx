@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext } from "react";
 import { getSavedSongs, toggleSaveSong } from "../../home/services/song.api";
+import { getOrMatchYouTubeTrack } from "../../search/services/youtube.api";
 import Navbar from "../../shared/components/Navbar";
 import { SongContext } from "../../home/songContext";
 import "../style/favorites.scss";
@@ -11,11 +12,13 @@ const MOOD_EMOJIS = {
   surprised: "😮"
 };
 
+const DEFAULT_POSTER = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300";
+
 export default function FavoritesPage() {
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { setSong, setQueue } = useContext(SongContext);
+  const { setSong, setQueue, setIsPlaying, setSavedTime } = useContext(SongContext);
 
   useEffect(() => {
     let isMounted = true;
@@ -37,13 +40,46 @@ export default function FavoritesPage() {
     };
   }, []);
 
-  const handlePlayFavorite = (songItem) => {
-    if (songItem && setSong) {
-      setSong(songItem);
-      if (favorites.length > 0 && setQueue) {
-        setQueue(favorites);
+  const handlePlayFavorite = async (songItem) => {
+    if (!songItem || !setSong) return;
+
+    if (setSavedTime) setSavedTime(0);
+
+    let playable = {
+      ...songItem,
+      _id: songItem._id || songItem.spotifyId || songItem.videoId,
+      posterUrl: songItem.posterUrl || songItem.albumImage || DEFAULT_POSTER,
+      mood: songItem.mood || songItem.artists || "",
+      title: songItem.title || ""
+    };
+
+    if (!songItem.videoId || songItem.videoId.length > 15 || songItem.videoId === songItem.spotifyId) {
+      try {
+        const matched = await getOrMatchYouTubeTrack(playable);
+        if (matched?.youtubeId || matched?.videoId) {
+          playable = {
+            ...playable,
+            ...matched,
+            videoId: matched.youtubeId || matched.videoId,
+            youtubeId: matched.youtubeId || matched.videoId
+          };
+        }
+      } catch (err) {
+        console.error("Match error on favorite play:", err);
       }
     }
+
+    setSong(playable);
+    if (favorites.length > 0 && setQueue) {
+      setQueue(favorites.map(s => ({
+        ...s,
+        _id: s._id || s.spotifyId || s.videoId,
+        posterUrl: s.posterUrl || s.albumImage || DEFAULT_POSTER,
+        mood: s.mood || s.artists || "",
+        title: s.title || ""
+      })));
+    }
+    if (setIsPlaying) setIsPlaying(true);
   };
 
   const handleUnsave = async (e, songId) => {
@@ -82,39 +118,46 @@ export default function FavoritesPage() {
         </div>
       ) : (
         <div className="favorites-grid">
-          {favorites.map((songItem) => (
-            <div
-              key={songItem._id}
-              className="favorite-card"
-              onClick={() => handlePlayFavorite(songItem)}
-            >
-              <div className="favorite-card__poster-wrapper">
-                <img
-                  src={songItem.posterUrl || "https://via.placeholder.com/200"}
-                  alt={songItem.title}
-                />
-                <div className="favorite-card__play-overlay">
-                  <div className="play-icon">▶</div>
-                </div>
-              </div>
+          {favorites.map((songItem) => {
+            const poster = songItem.posterUrl && !songItem.posterUrl.includes("via.placeholder")
+              ? songItem.posterUrl
+              : (songItem.albumImage || DEFAULT_POSTER);
 
-              <div className="favorite-card__details">
-                <div className="favorite-card__info">
-                  <span className="favorite-card__title">{songItem.title}</span>
-                  <span className="favorite-card__mood">
-                    {MOOD_EMOJIS[songItem.mood?.toLowerCase()]} {songItem.mood}
-                  </span>
+            return (
+              <div
+                key={songItem._id}
+                className="favorite-card"
+                onClick={() => handlePlayFavorite(songItem)}
+              >
+                <div className="favorite-card__poster-wrapper">
+                  <img
+                    src={poster}
+                    alt={songItem.title}
+                    onError={(e) => { e.currentTarget.src = DEFAULT_POSTER; }}
+                  />
+                  <div className="favorite-card__play-overlay">
+                    <div className="play-icon">▶</div>
+                  </div>
                 </div>
-                <button
-                  className="favorite-card__unsave-btn"
-                  onClick={(e) => handleUnsave(e, songItem._id)}
-                  title="Remove from favorites"
-                >
-                  🔖
-                </button>
+
+                <div className="favorite-card__details">
+                  <div className="favorite-card__info">
+                    <span className="favorite-card__title">{songItem.title}</span>
+                    <span className="favorite-card__mood">
+                      {MOOD_EMOJIS[songItem.mood?.toLowerCase()]} {songItem.mood}
+                    </span>
+                  </div>
+                  <button
+                    className="favorite-card__unsave-btn"
+                    onClick={(e) => handleUnsave(e, songItem._id)}
+                    title="Remove from favorites"
+                  >
+                    🔖
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

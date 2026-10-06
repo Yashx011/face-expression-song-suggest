@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext } from "react";
-import { getSong } from "../../home/services/song.api";
+import { getRecommendedNextTracks } from "../../search/services/spotify.api";
+import { getOrMatchYouTubeTrack } from "../../search/services/youtube.api";
 import Navbar from "../../shared/components/Navbar";
 import { SongContext } from "../../home/songContext";
 import "../style/playlists.scss";
@@ -15,15 +16,15 @@ export default function PlaylistsPage() {
   const [activeMood, setActiveMood] = useState("happy");
   const [playlistSongs, setPlaylistSongs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { setSong, setQueue } = useContext(SongContext);
+  const { setSong, setQueue, setIsPlaying } = useContext(SongContext);
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    getSong(activeMood)
+    getRecommendedNextTracks({ mood: activeMood })
       .then((data) => {
         if (isMounted) {
-          setPlaylistSongs(data.songs || []);
+          setPlaylistSongs(data?.results || []);
           setLoading(false);
         }
       })
@@ -38,17 +39,47 @@ export default function PlaylistsPage() {
     };
   }, [activeMood]);
 
-  const handlePlayAll = () => {
+  const handlePlayAll = async () => {
     if (playlistSongs.length > 0) {
-      if (setQueue) setQueue(playlistSongs);
-      if (setSong) setSong(playlistSongs[0]);
+      try {
+        const first = await getOrMatchYouTubeTrack(playlistSongs[0]);
+        const playable = {
+          ...first,
+          _id: first.spotifyId || first.videoId || first._id,
+          posterUrl: first.albumImage || first.posterUrl || "https://via.placeholder.com/150",
+          mood: activeMood,
+          artist: first.artists || first.artist || "",
+          artists: first.artists || first.artist || "",
+          title: first.title
+        };
+        if (setQueue) setQueue(playlistSongs);
+        if (setSong) setSong(playable);
+        if (setIsPlaying) setIsPlaying(true);
+      } catch (err) {
+        console.error("Failed to play playlist tracks:", err);
+      }
     }
   };
 
-  const handlePlayTrack = (track) => {
+  const handlePlayTrack = async (track) => {
     if (track) {
-      if (setQueue && playlistSongs.length > 0) setQueue(playlistSongs);
-      if (setSong) setSong(track);
+      try {
+        const matched = await getOrMatchYouTubeTrack(track);
+        const playable = {
+          ...matched,
+          _id: matched.spotifyId || matched.videoId || matched._id,
+          posterUrl: matched.albumImage || matched.posterUrl || "https://via.placeholder.com/150",
+          mood: activeMood,
+          artist: matched.artists || matched.artist || "",
+          artists: matched.artists || matched.artist || "",
+          title: matched.title
+        };
+        if (setQueue && playlistSongs.length > 0) setQueue(playlistSongs);
+        if (setSong) setSong(playable);
+        if (setIsPlaying) setIsPlaying(true);
+      } catch (err) {
+        console.error("Failed to play track:", err);
+      }
     }
   };
 
@@ -101,19 +132,19 @@ export default function PlaylistsPage() {
         <div className="playlist-tracks-grid">
           {playlistSongs.map((track) => (
             <div
-              key={track._id}
+              key={track.spotifyId || track._id || track.videoId}
               className="track-card"
               onClick={() => handlePlayTrack(track)}
               title="Click to play"
             >
               <img
                 className="track-card__poster"
-                src={track.posterUrl || "https://via.placeholder.com/150"}
+                src={track.albumImage || track.posterUrl || "https://via.placeholder.com/150"}
                 alt={track.title}
               />
               <div className="track-card__details">
                 <span className="track-card__title">{track.title}</span>
-                <span className="track-card__mood">{track.mood}</span>
+                <span className="track-card__mood">{track.artists || track.mood || activeMood}</span>
               </div>
             </div>
           ))}

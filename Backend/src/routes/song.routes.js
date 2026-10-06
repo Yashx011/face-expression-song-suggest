@@ -1,12 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const upload = require("../middleware/upload.middleware");
 const songController = require("../controllers/song.controller");
-const { authUser, authUserOptional } = require("../middleware/auth.middleware");
-
-// General song endpoints
-router.post("/", upload.single("song"), songController.uploadSong);
-router.get("/", authUserOptional, songController.getSong);
+const { authUser } = require("../middleware/auth.middleware");
 
 // Interaction endpoints (Protected)
 router.post("/like/:songId", authUser, songController.toggleLike);

@@ -5,9 +5,15 @@ const api = axios.create({
   withCredentials: true
 });
 
-export const searchSpotify = async (query) => {
+export const searchSpotify = async (query, offset = 0, limit = 10) => {
   const response = await api.get("/api/spotify/search", {
-    params: { q: query }
+    params: { q: query, offset, limit }
   });
   return response.data;
 };
+
+export const getRecommendedNextTracks = async (payload) => {
+  const response = await api.post("/api/spotify/recommend-next", payload);
+  return response.data;
+};
+
