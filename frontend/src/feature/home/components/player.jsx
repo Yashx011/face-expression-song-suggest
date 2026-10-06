@@ -2,6 +2,7 @@ import { useContext, useRef, useState, useEffect, useCallback } from "react";
 import { SongContext } from "../songContext";
 import useAuth from "../../auth/hook/useAuth";
 import { getInteractionStatus, toggleLikeSong, toggleDislikeSong, toggleSaveSong } from "../services/song.api";
+import { getOrMatchYouTubeTrack } from "../../search/services/youtube.api";
 import "./player.scss";
 
 /* ─── SVG Icons ─── */
@@ -107,13 +108,46 @@ function formatTime(seconds) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+function getTrackId(track) {
+  if (!track) return null;
+  return track._id || track.spotifyId || track.videoId || track.id || null;
+}
+
+function formatPlayableSong(track) {
+  if (!track) return null;
+  return {
+    ...track,
+    _id: getTrackId(track),
+    spotifyId: track.spotifyId || track._id,
+    videoId: track.videoId || track.youtubeId,
+    youtubeId: track.youtubeId || track.videoId,
+    posterUrl: track.posterUrl || track.albumImage || "https://via.placeholder.com/150",
+    mood: track.mood || track.artists || "",
+    title: track.title || ""
+  };
+}
+
 export default function Player({ onSkip }) {
   const { song, setSong, queue, loading } = useContext(SongContext);
   const { user } = useAuth();
 
   const audioRef = useRef(null);
+  const ytPlayerRef = useRef(null);
   const progressRef = useRef(null);
   const expandedProgressRef = useRef(null);
+
+  const loadedVideoIdRef = useRef(null);
+  const queueRef = useRef(queue);
+  const songRef = useRef(song);
+  const isHandlingEndedRef = useRef(false);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    songRef.current = song;
+  }, [song]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -125,27 +159,176 @@ export default function Player({ onSkip }) {
   const [isDisliked, setIsDisliked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [ytApiReady, setYtApiReady] = useState(false);
 
-  /* ── Current Queue Index ── */
-  const currentIndex = queue && song ? queue.findIndex((s) => s._id === song._id) : -1;
+  const targetVideoId = song?.youtubeId || song?.videoId;
+  const isYouTubeTrack = Boolean(targetVideoId || song?.source === "youtube");
+  const currentSongId = getTrackId(song);
+  const currentIndex = queue && currentSongId ? queue.findIndex((s) => getTrackId(s) === currentSongId) : -1;
 
-  /* ── Sync audio source when song changes ── */
+  /* ── Load YouTube IFrame API Script ── */
   useEffect(() => {
-    if (audioRef.current && song?.url) {
-      audioRef.current.load();
-      audioRef.current
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((err) => console.log("Autoplay prevented by browser:", err));
-      setCurrentTime(0);
+    if (window.YT && window.YT.Player) {
+      setYtApiReady(true);
+      return;
     }
-  }, [song?.url]);
+
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    const firstScriptTag = document.getElementsByTagName("script")[0];
+    if (firstScriptTag && firstScriptTag.parentNode) {
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+    } else {
+      document.head.appendChild(tag);
+    }
+
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      if (prevReady) prevReady();
+      setYtApiReady(true);
+    };
+  }, []);
+
+  /* ── Auto Next Handler ── */
+  const handleAutoNext = useCallback(async () => {
+    const currentQ = queueRef.current;
+    const currentS = songRef.current;
+    setIsPlaying(false);
+    setCurrentTime(0);
+
+    if (!currentQ || currentQ.length === 0) {
+      if (onSkip) onSkip();
+      return;
+    }
+
+    const curId = getTrackId(currentS);
+    const curIdx = currentQ.findIndex((item) => getTrackId(item) === curId);
+    const nextIdx = curIdx !== -1 ? (curIdx + 1) % currentQ.length : 0;
+    const rawNext = currentQ[nextIdx];
+
+    try {
+      const nextSong = await getOrMatchYouTubeTrack(rawNext);
+      setSong(formatPlayableSong(nextSong));
+    } catch (err) {
+      console.error("Auto next match error:", err);
+    }
+  }, [setSong, onSkip]);
+
+  const handleAutoNextRef = useRef(handleAutoNext);
+  useEffect(() => {
+    handleAutoNextRef.current = handleAutoNext;
+  }, [handleAutoNext]);
+
+  /* ── Initialize or update YouTube Player when song changes ── */
+  useEffect(() => {
+    if (!song) return;
+
+    const vidId = song.youtubeId || song.videoId;
+    const isYt = Boolean(vidId || song.source === "youtube");
+
+    if (isYt && ytApiReady && vidId) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+
+      // Prevent same-video restart (Rule 9)
+      if (loadedVideoIdRef.current === vidId) {
+        return;
+      }
+
+      loadedVideoIdRef.current = vidId;
+
+      if (!ytPlayerRef.current) {
+        ytPlayerRef.current = new window.YT.Player("yt-player-element", {
+          height: "0",
+          width: "0",
+          videoId: vidId,
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            modestbranding: 1,
+            rel: 0
+          },
+          events: {
+            onReady: (event) => {
+              event.target.setVolume(volume * 100);
+              event.target.playVideo();
+              setIsPlaying(true);
+            },
+            onStateChange: (event) => {
+              if (event.data === window.YT.PlayerState.PLAYING) {
+                setIsPlaying(true);
+              } else if (event.data === window.YT.PlayerState.PAUSED) {
+                setIsPlaying(false);
+              } else if (event.data === window.YT.PlayerState.ENDED) {
+                setIsPlaying(false);
+                if (isHandlingEndedRef.current) return;
+                isHandlingEndedRef.current = true;
+                handleAutoNextRef.current().finally(() => {
+                  setTimeout(() => {
+                    isHandlingEndedRef.current = false;
+                  }, 500);
+                });
+              }
+            },
+            onError: (err) => {
+              console.error("YouTube playback error:", err);
+              handleAutoNextRef.current();
+            }
+          }
+        });
+      } else {
+        ytPlayerRef.current.loadVideoById(vidId);
+        ytPlayerRef.current.playVideo();
+        setIsPlaying(true);
+      }
+      setCurrentTime(0);
+    } else if (!isYt && song.url) {
+      loadedVideoIdRef.current = null;
+      if (ytPlayerRef.current && ytPlayerRef.current.pauseVideo) {
+        try {
+          ytPlayerRef.current.pauseVideo();
+        } catch (err) {}
+      }
+      if (audioRef.current) {
+        audioRef.current.load();
+        audioRef.current
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch((err) => console.log("Autoplay prevented:", err));
+        setCurrentTime(0);
+      }
+    }
+  }, [song?.youtubeId, song?.videoId, song?.url, song?.source, ytApiReady]);
+
+  /* ── Time Poller for YouTube Playback ── */
+  useEffect(() => {
+    let timer = null;
+    if (isYouTubeTrack && isPlaying && ytPlayerRef.current) {
+      timer = setInterval(() => {
+        try {
+          if (ytPlayerRef.current.getCurrentTime) {
+            const cur = ytPlayerRef.current.getCurrentTime() || 0;
+            const dur = ytPlayerRef.current.getDuration() || (song.duration ? song.duration / 1000 : 0);
+            setCurrentTime(cur);
+            if (dur) setDuration(dur);
+          }
+        } catch (e) {}
+      }, 250);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isYouTubeTrack, isPlaying, song?.duration]);
 
   /* ── Sync interaction status when song or user changes ── */
   useEffect(() => {
     let isMounted = true;
-    if (user && song?._id) {
-      getInteractionStatus(song._id)
+    const songId = currentSongId;
+    if (user && songId) {
+      getInteractionStatus(songId)
         .then((res) => {
           if (isMounted) {
             setIsLiked(!!res?.isLiked);
@@ -168,24 +351,35 @@ export default function Player({ onSkip }) {
     return () => {
       isMounted = false;
     };
-  }, [song?._id, user]);
+  }, [currentSongId, user]);
 
   const togglePlay = useCallback((e) => {
     if (e) e.stopPropagation();
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
+    if (isYouTubeTrack && ytPlayerRef.current) {
+      if (isPlaying) {
+        ytPlayerRef.current.pauseVideo();
+        setIsPlaying(false);
+      } else {
+        ytPlayerRef.current.playVideo();
+        setIsPlaying(true);
+      }
     } else {
-      audio.play().catch(() => {});
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (isPlaying) {
+        audio.pause();
+      } else {
+        audio.play().catch(() => {});
+      }
+      setIsPlaying(!isPlaying);
     }
-    setIsPlaying(!isPlaying);
-  }, [isPlaying]);
+  }, [isPlaying, isYouTubeTrack]);
 
   /* ── Toggle Like ── */
   const handleToggleLike = useCallback(async (e) => {
     if (e) e.stopPropagation();
-    if (!song?._id) return;
+    const songId = currentSongId;
+    if (!songId) return;
     if (!user) {
       alert("Please log in to like songs");
       return;
@@ -195,19 +389,20 @@ export default function Player({ onSkip }) {
     if (!prevLiked) setIsDisliked(false);
 
     try {
-      const res = await toggleLikeSong(song._id);
+      const res = await toggleLikeSong(songId, song);
       setIsLiked(!!res?.isLiked);
       setIsDisliked(!!res?.isDisliked);
     } catch (err) {
       console.error("Failed to toggle like:", err);
       setIsLiked(prevLiked);
     }
-  }, [song?._id, user, isLiked]);
+  }, [currentSongId, song, user, isLiked]);
 
   /* ── Toggle Dislike ── */
   const handleToggleDislike = useCallback(async (e) => {
     if (e) e.stopPropagation();
-    if (!song?._id) return;
+    const songId = currentSongId;
+    if (!songId) return;
     if (!user) {
       alert("Please log in to dislike songs");
       return;
@@ -217,19 +412,20 @@ export default function Player({ onSkip }) {
     if (!prevDisliked) setIsLiked(false);
 
     try {
-      const res = await toggleDislikeSong(song._id);
+      const res = await toggleDislikeSong(songId, song);
       setIsDisliked(!!res?.isDisliked);
       setIsLiked(!!res?.isLiked);
     } catch (err) {
       console.error("Failed to toggle dislike:", err);
       setIsDisliked(prevDisliked);
     }
-  }, [song?._id, user, isDisliked]);
+  }, [currentSongId, song, user, isDisliked]);
 
   /* ── Toggle Save ── */
   const handleToggleSave = useCallback(async (e) => {
     if (e) e.stopPropagation();
-    if (!song?._id) return;
+    const songId = currentSongId;
+    if (!songId) return;
     if (!user) {
       alert("Please log in to save songs");
       return;
@@ -237,192 +433,219 @@ export default function Player({ onSkip }) {
     const prevSaved = isSaved;
     setIsSaved(!prevSaved);
     try {
-      const res = await toggleSaveSong(song._id);
+      const res = await toggleSaveSong(songId, song);
       setIsSaved(!!res?.isSaved);
     } catch (err) {
       console.error("Failed to toggle save:", err);
       setIsSaved(prevSaved);
     }
-  }, [song?._id, user, isSaved]);
+  }, [currentSongId, song, user, isSaved]);
 
-  /* ── Next Song in Queue ── */
-  const handleNextTrack = useCallback((e) => {
+  /* ── Next Track ── */
+  const handleNextTrack = useCallback(async (e) => {
     if (e) e.stopPropagation();
-    if (queue && queue.length > 0 && currentIndex !== -1) {
-      const nextIdx = (currentIndex + 1) % queue.length;
-      setSong(queue[nextIdx]);
-    } else if (onSkip) {
-      onSkip();
-    }
-  }, [queue, currentIndex, setSong, onSkip]);
-
-  /* ── Previous Song in Queue ── */
-  const handlePrevTrack = useCallback((e) => {
-    if (e) e.stopPropagation();
-    const audio = audioRef.current;
-    if (audio && audio.currentTime > 3) {
-      audio.currentTime = 0;
+    const q = queueRef.current;
+    const s = songRef.current;
+    if (!q || q.length === 0) {
+      if (onSkip) onSkip();
       return;
     }
-    if (queue && queue.length > 0 && currentIndex > 0) {
-      setSong(queue[currentIndex - 1]);
-    } else if (audio) {
-      audio.currentTime = 0;
-    }
-  }, [queue, currentIndex, setSong]);
 
+    const curId = getTrackId(s);
+    const curIdx = q.findIndex((item) => getTrackId(item) === curId);
+    const nextIdx = curIdx !== -1 ? (curIdx + 1) % q.length : 0;
+    const rawNext = q[nextIdx];
+
+    try {
+      const nextSong = await getOrMatchYouTubeTrack(rawNext);
+      setSong(formatPlayableSong(nextSong));
+    } catch (err) {
+      console.error("Next track error:", err);
+    }
+  }, [setSong, onSkip]);
+
+  /* ── Previous Track ── */
+  const handlePrevTrack = useCallback(async (e) => {
+    if (e) e.stopPropagation();
+    if (currentTime > 3) {
+      if (isYouTubeTrack && ytPlayerRef.current) {
+        ytPlayerRef.current.seekTo(0, true);
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+      }
+      setCurrentTime(0);
+      return;
+    }
+
+    const q = queueRef.current;
+    const s = songRef.current;
+    if (!q || q.length === 0) return;
+
+    const curId = getTrackId(s);
+    const curIdx = q.findIndex((item) => getTrackId(item) === curId);
+    const prevIdx = curIdx > 0 ? curIdx - 1 : 0;
+    const rawPrev = q[prevIdx];
+
+    try {
+      const prevSong = await getOrMatchYouTubeTrack(rawPrev);
+      setSong(formatPlayableSong(prevSong));
+    } catch (err) {
+      console.error("Prev track error:", err);
+    }
+  }, [currentTime, isYouTubeTrack, setSong]);
+
+  /* ── Skip 5 Seconds Forward ── */
   const skipForward = useCallback((e) => {
     if (e) e.stopPropagation();
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.min(audio.currentTime + 5, audio.duration || 0);
-  }, []);
+    if (isYouTubeTrack && ytPlayerRef.current) {
+      const cur = ytPlayerRef.current.getCurrentTime() || currentTime || 0;
+      const dur = ytPlayerRef.current.getDuration() || duration || 0;
+      const target = Math.min(cur + 5, dur);
+      ytPlayerRef.current.seekTo(target, true);
+      setCurrentTime(target);
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = Math.min(audioRef.current.currentTime + 5, audioRef.current.duration || 0);
+    }
+  }, [isYouTubeTrack, currentTime, duration]);
 
+  /* ── Skip 5 Seconds Backward ── */
   const skipBackward = useCallback((e) => {
     if (e) e.stopPropagation();
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(audio.currentTime - 5, 0);
-  }, []);
+    if (isYouTubeTrack && ytPlayerRef.current) {
+      const cur = ytPlayerRef.current.getCurrentTime() || currentTime || 0;
+      const target = Math.max(cur - 5, 0);
+      ytPlayerRef.current.seekTo(target, true);
+      setCurrentTime(target);
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = Math.max(audioRef.current.currentTime - 5, 0);
+    }
+  }, [isYouTubeTrack, currentTime]);
 
+  /* ── Progress Bar Seeking ── */
   const handleProgressClick = useCallback(
     (e, targetRef) => {
       if (e) e.stopPropagation();
-      const audio = audioRef.current;
       const bar = targetRef ? targetRef.current : progressRef.current;
-      if (!audio || !bar || !duration) return;
+      if (!bar || !duration) return;
       const rect = bar.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-      audio.currentTime = ratio * duration;
+      const targetTime = ratio * duration;
+
+      if (isYouTubeTrack && ytPlayerRef.current) {
+        ytPlayerRef.current.seekTo(targetTime, true);
+        setCurrentTime(targetTime);
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = targetTime;
+      }
     },
-    [duration]
+    [duration, isYouTubeTrack]
   );
 
+  /* ── Volume Adjustment ── */
   const handleVolumeChange = useCallback((e) => {
     if (e) e.stopPropagation();
     const val = parseFloat(e.target.value);
     setVolume(val);
     setIsMuted(val === 0);
     if (audioRef.current) audioRef.current.volume = val;
+    if (ytPlayerRef.current && ytPlayerRef.current.setVolume) {
+      ytPlayerRef.current.setVolume(val * 100);
+    }
   }, []);
 
+  /* ── Mute / Unmute ── */
   const toggleMute = useCallback((e) => {
     if (e) e.stopPropagation();
-    const audio = audioRef.current;
-    if (!audio) return;
     if (isMuted) {
-      audio.volume = volume || 0.8;
       setIsMuted(false);
+      if (audioRef.current) audioRef.current.volume = volume || 0.8;
+      if (ytPlayerRef.current && ytPlayerRef.current.unMute) ytPlayerRef.current.unMute();
     } else {
-      audio.volume = 0;
       setIsMuted(true);
+      if (audioRef.current) audioRef.current.volume = 0;
+      if (ytPlayerRef.current && ytPlayerRef.current.mute) ytPlayerRef.current.mute();
     }
   }, [isMuted, volume]);
 
   const onTimeUpdate = useCallback(() => {
-    if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
-  }, []);
+    if (!isYouTubeTrack && audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  }, [isYouTubeTrack]);
 
   const onLoadedMetadata = useCallback(() => {
-    if (audioRef.current) setDuration(audioRef.current.duration);
-  }, []);
-
-  /* ── AUTO-NEXT: Automatically play next song in queue when track ends ── */
-  const onEnded = useCallback(() => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-    if (queue && queue.length > 0 && currentIndex !== -1) {
-      const nextIdx = (currentIndex + 1) % queue.length;
-      setSong(queue[nextIdx]);
-    } else if (onSkip) {
-      onSkip();
+    if (!isYouTubeTrack && audioRef.current) {
+      setDuration(audioRef.current.duration);
     }
-  }, [queue, currentIndex, setSong, onSkip]);
-
-  const handlePlayerClick = () => {
-    if (song?.url) {
-      setIsExpanded(true);
-    }
-  };
+  }, [isYouTubeTrack]);
 
   const progressPct = duration ? (currentTime / duration) * 100 : 0;
-
-  if (!song?.url) {
-    return (
-      <div className={`player ${loading ? "player--loading" : ""}`}>
-        <audio ref={audioRef} />
-        <div className="player__left">
-          <div className="player__artwork-container">
-            <div
-              className="player__artwork"
-              style={{ background: "linear-gradient(135deg, #2e1065 0%, #581c87 100%)", width: "100%", height: "100%" }}
-            />
-          </div>
-          <div className="player__info">
-            <span className="player__title">
-              {loading ? "Loading song..." : "No song selected"}
-            </span>
-            <span className="player__mood">
-              {loading ? "Please wait" : "Detect mood"}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const posterSrc = song?.posterUrl || song?.albumImage || "https://via.placeholder.com/150";
+  const songTitle = song?.title || (loading ? "Loading song..." : "No song selected");
+  const songSubtext = song?.mood || song?.artists || (loading ? "Please wait" : "Detect mood");
 
   return (
     <>
+      <div id="yt-player-element" style={{ display: "none" }} />
+      <audio
+        ref={audioRef}
+        src={song?.url || ""}
+        preload="metadata"
+        onTimeUpdate={onTimeUpdate}
+        onLoadedMetadata={onLoadedMetadata}
+        onEnded={handleAutoNext}
+      />
+
       {/* Mini Bottom Player */}
       <div
         className={`player ${loading ? "player--loading" : ""}`}
-        onClick={handlePlayerClick}
+        onClick={() => song && setIsExpanded(true)}
       >
-        <audio
-          ref={audioRef}
-          src={song.url}
-          preload="metadata"
-          onTimeUpdate={onTimeUpdate}
-          onLoadedMetadata={onLoadedMetadata}
-          onEnded={onEnded}
-        />
-
         {/* LEFT SECTION */}
         <div className="player__left" onClick={(e) => e.stopPropagation()}>
-          <div className="player__artwork-container" onClick={() => setIsExpanded(true)}>
-            <img className="player__artwork" src={song.posterUrl} alt={song.title} />
+          <div className="player__artwork-container" onClick={() => song && setIsExpanded(true)}>
+            {song ? (
+              <img className="player__artwork" src={posterSrc} alt={songTitle} />
+            ) : (
+              <div
+                className="player__artwork"
+                style={{ background: "linear-gradient(135deg, #2e1065 0%, #581c87 100%)", width: "100%", height: "100%" }}
+              />
+            )}
           </div>
-          <div className="player__info" onClick={() => setIsExpanded(true)}>
-            <span className="player__title">{song.title}</span>
-            <span className="player__mood">{song.mood}</span>
+          <div className="player__info" onClick={() => song && setIsExpanded(true)}>
+            <span className="player__title">{songTitle}</span>
+            <span className="player__mood">{songSubtext}</span>
           </div>
 
-          <div className="player__actions">
-            <button
-              className={`player__action-btn ${isLiked ? "active-like" : ""}`}
-              onClick={handleToggleLike}
-              title="Like"
-            >
-              {isLiked ? <IconHeartFilled /> : <IconHeartOutline />}
-            </button>
+          {song && (
+            <div className="player__actions">
+              <button
+                className={`player__action-btn ${isLiked ? "active-like" : ""}`}
+                onClick={handleToggleLike}
+                title="Like"
+              >
+                {isLiked ? <IconHeartFilled /> : <IconHeartOutline />}
+              </button>
 
-            <button
-              className={`player__action-btn ${isDisliked ? "active-dislike" : ""}`}
-              onClick={handleToggleDislike}
-              title="Dislike"
-            >
-              {isDisliked ? <IconDislikeFilled /> : <IconDislikeOutline />}
-            </button>
+              <button
+                className={`player__action-btn ${isDisliked ? "active-dislike" : ""}`}
+                onClick={handleToggleDislike}
+                title="Dislike"
+              >
+                {isDisliked ? <IconDislikeFilled /> : <IconDislikeOutline />}
+              </button>
 
-            <button
-              className={`player__action-btn ${isSaved ? "active-save" : ""}`}
-              onClick={handleToggleSave}
-              title="Save"
-            >
-              {isSaved ? <IconBookmarkFilled /> : <IconBookmarkOutline />}
-            </button>
-          </div>
+              <button
+                className={`player__action-btn ${isSaved ? "active-save" : ""}`}
+                onClick={handleToggleSave}
+                title="Save"
+              >
+                {isSaved ? <IconBookmarkFilled /> : <IconBookmarkOutline />}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* CENTER SECTION */}
@@ -479,7 +702,7 @@ export default function Player({ onSkip }) {
       </div>
 
       {/* Expanded Now Playing Overlay */}
-      {isExpanded && (
+      {isExpanded && song && (
         <div className="player-overlay">
           <header className="player-overlay__header">
             <button
@@ -495,14 +718,14 @@ export default function Player({ onSkip }) {
 
           <main className="player-overlay__body">
             <div className="player-overlay__artwork-wrapper">
-              <img src={song.posterUrl} alt={song.title} />
+              <img src={posterSrc} alt={songTitle} />
             </div>
 
             <div className="player-overlay__meta">
-              <h2 className="track-title">{song.title}</h2>
+              <h2 className="track-title">{songTitle}</h2>
               <span className="track-mood">
                 <span>{MOOD_EMOJIS[song.mood?.toLowerCase()] || "🎵"}</span>
-                <span>{song.mood}</span>
+                <span>{songSubtext}</span>
               </span>
             </div>
 
@@ -543,26 +766,31 @@ export default function Player({ onSkip }) {
               <div className="player-overlay__queue">
                 <div className="queue-header">
                   <span>Queue ({queue.length})</span>
-                  <span>{song.mood} mood</span>
+                  <span>{songSubtext}</span>
                 </div>
                 <div className="queue-list">
                   {queue.map((item) => {
-                    const isActive = item._id === song._id;
+                    const itemId = getTrackId(item);
+                    const activeId = getTrackId(song);
+                    const isActive = itemId === activeId;
                     return (
                       <div
-                        key={item._id}
+                        key={itemId}
                         className={`queue-item ${isActive ? "active-queue-item" : ""}`}
-                        onClick={() => setSong(item)}
+                        onClick={async () => {
+                          const matched = await getOrMatchYouTubeTrack(item);
+                          setSong(formatPlayableSong(matched));
+                        }}
                       >
                         <img
                           className="queue-item__poster"
-                          src={item.posterUrl || "https://via.placeholder.com/150"}
+                          src={item.posterUrl || item.albumImage || "https://via.placeholder.com/150"}
                           alt={item.title}
                         />
                         <div className="queue-item__info">
                           <span className="queue-item__title">{item.title}</span>
                           <span className="queue-item__mood">
-                            {MOOD_EMOJIS[item.mood?.toLowerCase()]} {item.mood}
+                            {MOOD_EMOJIS[item.mood?.toLowerCase()]} {item.artists || item.mood}
                           </span>
                         </div>
                         {isActive && <span className="queue-item__indicator">▶ Playing</span>}

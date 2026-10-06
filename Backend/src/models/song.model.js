@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+
 const songSchema = new mongoose.Schema({
     url: {
         type: String,
@@ -6,22 +7,25 @@ const songSchema = new mongoose.Schema({
     },
     posterUrl: {
         type: String,
-
         required: true,
     },
     title: {
         type: String,
         required: true,
     },
+    spotifyId: {
+        type: String,
+        sparse: true
+    },
+    videoId: {
+        type: String,
+        sparse: true
+    },
     mood: {
         type: String,
-        enum:{
-            values:["happy","sad","surprised","neutral"],
-            message:"Enum this is "
-        }
-    },
+        default: "happy"
+    }
+});
 
-})
-
-const songModel = mongoose.model("Song", songSchema)
+const songModel = mongoose.model("Song", songSchema);
 module.exports = songModel;

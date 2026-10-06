@@ -79,7 +79,7 @@ export default function Navbar() {
           </NavLink>
 
           <NavLink
-            to="/playlists"
+            to="/search"
             className={({ isActive }) => `nav-btn ${isActive ? "active" : ""}`}
             title="Search"
           >

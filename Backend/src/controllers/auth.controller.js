@@ -6,6 +6,21 @@ const redis = require("../config/cache")
 const { verifyGoogleToken } = require("../services/google.service")
 const storageService = require("../services/storage.service")
 
+function formatUserResponse(user) {
+    if (!user) return null;
+    const effectiveProfilePicture = user.profilePicture || user.googleProfilePicture || null;
+    return {
+        id: user._id,
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        profilePicture: effectiveProfilePicture,
+        customProfilePicture: user.profilePicture || null,
+        googleProfilePicture: user.googleProfilePicture || null,
+        authProvider: user.authProvider
+    };
+}
+
 async function registerUser(req,res){
     const {username,email,password} = req.body
 
@@ -34,11 +49,7 @@ const token = JWT.sign({_id:user._id, username:user.username,email:user.email},p
 
 return res.status(201).json({
     message:"user created successfully",
-    user:{
-        id:user._id,
-        username:user.username,
-        email:user.email
-    },
+    user: formatUserResponse(user),
     token
 })}
 
@@ -60,11 +71,7 @@ async function loginUser(req,res){
     res.cookie("token",token)
     return res.status(200).json({
         message:"User is logged in successfully",
-        user:{
-            id:user._id,
-            username:user.username,
-            email:user.email
-        },
+        user: formatUserResponse(user),
         token
     })
 }
@@ -103,12 +110,15 @@ async function googleLogin(req, res) {
             username: name || email.split("@")[0],
             email: email,
             googleId: sub,
-            profilePicture: picture,
+            googleProfilePicture: picture,
             authProvider: "google"
         })
     } else {
         user.googleId = user.googleId || sub
-        user.profilePicture = user.profilePicture || picture
+        user.googleProfilePicture = picture
+        if (user.profilePicture && user.profilePicture.includes("googleusercontent.com")) {
+            user.profilePicture = undefined
+        }
         user.authProvider = "google"
         await user.save()
     }
@@ -123,11 +133,7 @@ async function googleLogin(req, res) {
 
     return res.status(200).json({
         message: "User is logged in successfully",
-        user: {
-            id: user._id,
-            username: user.username,
-            email: user.email
-        },
+        user: formatUserResponse(user),
         token: tokenJwt
     })
 }
@@ -136,7 +142,7 @@ async function getMe(req,res){
     const user = await userModel.findById(req.user._id)
     return res.status(200).json({
         message:"User fetched successfully",
-        user
+        user: formatUserResponse(user)
     })
 }
 
@@ -179,13 +185,7 @@ async function updateProfile(req, res) {
 
     return res.status(200).json({
         message: "Profile updated successfully",
-        user: {
-            id: updatedUser._id,
-            username: updatedUser.username,
-            email: updatedUser.email,
-            profilePicture: updatedUser.profilePicture,
-            authProvider: updatedUser.authProvider
-        }
+        user: formatUserResponse(updatedUser)
     })
 }
 
@@ -214,7 +214,7 @@ async function updateProfilePhoto(req, res) {
 
         return res.status(200).json({
             message: "Profile photo updated successfully",
-            user: updatedUser
+            user: formatUserResponse(updatedUser)
         })
     } catch (error) {
         return res.status(500).json({ message: error.message || "Failed to upload profile photo" })
