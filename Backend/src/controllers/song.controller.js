@@ -4,103 +4,75 @@ const Like = require("../models/like.model");
 const Dislike = require("../models/dislike.model");
 const Save = require("../models/save.model");
 const ListeningHistory = require("../models/history.model");
-const NodeID3 = require("node-id3");
-const songStorage = require("../services/storage.service");
-const recommendationService = require("../services/recommendation.service");
-
-async function uploadSong(req, res) {
-    const songBuffer = req.file.buffer;
-    const { mood } = req.body;
-    const tags = NodeID3.read(songBuffer);
-
-    const [songFile, posterFile] = await Promise.all([
-        songStorage.uploadFile({
-            buffer: songBuffer,
-            filename: tags.title + ".mp3",
-            folder: "songs"
-        }),
-        songStorage.uploadFile({
-            buffer: tags.image.imageBuffer,
-            filename: tags.title + ".jpg",
-            folder: "posters"
-        })
-    ]);
-    const song = await songModel.create({
-        url: songFile.url,
-        posterUrl: posterFile.url,
-        title: tags.title,
-        mood
-    });
-
-    return res.status(201).json({
-        message: "song uploaded successfully",
-        song
-    });
-}
-
-async function getSong(req, res) {
-    try {
-        const { mood, exclude } = req.query;
-        if (!mood) {
-            return res.status(400).json({ message: "Mood is required" });
-        }
-
-        const userId = req.user ? req.user._id : null;
-        const result = await recommendationService.getPersonalizedRecommendations(mood, userId, exclude);
-
-        if (!result.song) {
-            return res.status(200).json({
-                message: exclude ? "No other song found for this mood" : "No song found for this mood",
-                song: null,
-                songs: []
-            });
-        }
-
-        return res.status(200).json({
-            message: "Personalized recommendation fetched successfully",
-            song: result.song,
-            songs: result.songs
-        });
-    } catch (error) {
-        return res.status(500).json({
-            message: error.message || "Failed to fetch recommendation",
-            song: null,
-            songs: []
-        });
-    }
-}
 
 /* ───────────────────── LIKE / DISLIKE / SAVE INTERACTIONS ───────────────────── */
 
 async function resolveOrCreateSongId(songId, songData = {}) {
     if (!songId) return null;
 
+    let existing = null;
+
     if (mongoose.Types.ObjectId.isValid(songId)) {
-        const existingById = await songModel.findById(songId);
-        if (existingById) {
-            return existingById._id;
-        }
+        existing = await songModel.findById(songId);
     }
 
-    const existing = await songModel.findOne({
-        $or: [
+    if (!existing) {
+        const orConditions = [
             { spotifyId: songId },
-            { videoId: songId },
-            { title: songData.title || "" }
-        ]
-    });
+            { videoId: songId }
+        ];
+        if (songData.title) {
+            orConditions.push({ title: songData.title });
+        }
+        existing = await songModel.findOne({ $or: orConditions });
+    }
 
     if (existing) {
+        const hasRichData = songData.title || songData.posterUrl || songData.albumImage || songData.artists;
+        if (hasRichData) {
+            const isDummyTitle = !existing.title || existing.title === songId || existing.title === existing.spotifyId || existing.title === existing.videoId || (existing.title.length > 20 && !existing.title.includes(" "));
+            const isPlaceholderPoster = !existing.posterUrl || existing.posterUrl.includes("placeholder");
+
+            if (isDummyTitle || isPlaceholderPoster || (songData.title && songData.title !== existing.title)) {
+                if (songData.title) existing.title = songData.title;
+                if (songData.posterUrl || songData.albumImage) {
+                    existing.posterUrl = songData.posterUrl || songData.albumImage;
+                }
+                if (songData.youtubeUrl || songData.url) {
+                    existing.url = songData.youtubeUrl || songData.url;
+                }
+                if (songData.spotifyId) existing.spotifyId = songData.spotifyId;
+                if (songData.videoId || songData.youtubeId) {
+                    existing.videoId = songData.videoId || songData.youtubeId;
+                }
+                if (songData.artists || songData.mood) {
+                    existing.mood = songData.artists || songData.mood;
+                }
+                await existing.save();
+            }
+        }
         return existing._id;
     }
 
+    const hasMetadata = songData.title || songData.posterUrl || songData.albumImage;
+    if (!hasMetadata && !mongoose.Types.ObjectId.isValid(songId)) {
+        return null;
+    }
+
+    const title = songData.title || songData.name || songId;
+    const posterUrl = songData.posterUrl || songData.albumImage || "https://via.placeholder.com/150";
+    const vidId = songData.videoId || songData.youtubeId || (songId.length < 15 ? songId : undefined);
+    const spotId = songData.spotifyId || (songId.length > 15 ? songId : undefined);
+    const url = songData.youtubeUrl || songData.url || (vidId ? `https://www.youtube.com/watch?v=${vidId}` : `https://www.youtube.com/watch?v=${songId}`);
+    const mood = songData.artists || songData.mood || "happy";
+
     const newSong = await songModel.create({
-        title: songData.title || songId,
-        url: songData.youtubeUrl || songData.url || `https://www.youtube.com/watch?v=${songId}`,
-        posterUrl: songData.posterUrl || songData.albumImage || "https://via.placeholder.com/150",
-        spotifyId: songData.spotifyId || songId,
-        videoId: songData.videoId || songData.youtubeId || songId,
-        mood: songData.mood || "happy"
+        title,
+        url,
+        posterUrl,
+        spotifyId: spotId,
+        videoId: vidId,
+        mood
     });
 
     return newSong._id;
@@ -234,20 +206,26 @@ async function getSavedSongs(req, res) {
 
 async function recordHistory(req, res) {
     try {
-        const { songId, mood } = req.body;
+        const { songId, mood, songData } = req.body;
         const userId = req.user._id;
 
         if (!songId || !mood) {
             return res.status(400).json({ message: "Song ID and mood are required" });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(songId)) {
-            return res.status(400).json({ message: "Invalid song ID" });
+        let targetSongId = songId;
+        if (!mongoose.Types.ObjectId.isValid(targetSongId)) {
+            const resolved = await resolveOrCreateSongId(songId, songData || req.body);
+            if (resolved) {
+                targetSongId = resolved;
+            } else {
+                return res.status(400).json({ message: "Invalid song ID" });
+            }
         }
 
         const historyItem = await ListeningHistory.create({
             user: userId,
-            song: songId,
+            song: targetSongId,
             mood: mood.toLowerCase()
         });
 
@@ -369,8 +347,6 @@ async function getUserPreferences(req, res) {
 }
 
 module.exports = {
-    uploadSong,
-    getSong,
     toggleLike,
     toggleDislike,
     toggleSave,

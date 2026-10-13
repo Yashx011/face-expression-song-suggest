@@ -131,7 +131,7 @@ const Home = () => {
                 Now Playing Recommendation
               </div>
               <h3 className="song-title-display">{song.title || 'Recommended Track'}</h3>
-              <p className="song-artist-display">{song.artist || 'Moodify Collection'}</p>
+              <p className="song-artist-display">{song.artist || song.artists || 'Moodify Collection'}</p>
             </div>
           ) : (
             <div className="status-state empty-state">

@@ -5,14 +5,6 @@ const api = axios.create({
     withCredentials: true
 });
 
-export async function getSong(mood, exclude) {
-    let url = `/api/song?mood=${encodeURIComponent(mood)}`;
-    if (exclude) {
-        url += `&exclude=${encodeURIComponent(exclude)}`;
-    }
-    const response = await api.get(url);
-    return response.data;
-}
 
 export async function toggleLikeSong(songId, songData) {
     const response = await api.post(`/api/song/like/${encodeURIComponent(songId)}`, songData);
@@ -44,8 +36,8 @@ export async function getSavedSongs() {
     return response.data;
 }
 
-export async function recordHistory(songId, mood) {
-    const response = await api.post("/api/song/history", { songId, mood });
+export async function recordHistory(songId, mood, songData = {}) {
+    const response = await api.post("/api/song/history", { songId, mood, songData });
     return response.data;
 }
 
