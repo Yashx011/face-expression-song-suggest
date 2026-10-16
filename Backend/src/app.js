@@ -16,10 +16,12 @@ app.use(cors({
 const authRoutes = require("./routes/auth.routes")
 const spotifyRoutes = require("./routes/spotify.routes")
 const youtubeRoutes = require("./routes/youtube.routes")
+const aiRoutes = require("./routes/ai.routes")
 app.use("/api/auth",authRoutes)
 app.use("/api/song",songRouter)
 app.use("/api/spotify",spotifyRoutes)
 app.use("/api/youtube",youtubeRoutes)
+app.use("/api/ai",aiRoutes)
 
 
 

@@ -11,6 +11,7 @@ import AnalyticsPage from "./feature/analytics/pages/analytics";
 import PlaylistsPage from "./feature/playlists/pages/playlists";
 import FavoritesPage from "./feature/favorites/pages/favorites";
 import PreferencesPage from "./feature/preferences/pages/preferences";
+import AiPlaylistPage from "./feature/aiPlaylist/pages/aiPlaylist";
 
 import SearchPage from "./feature/search/pages/search";
 
@@ -30,6 +31,10 @@ const router = createBrowserRouter([
             {
                 path: "search",
                 element: <SearchPage />
+            },
+            {
+                path: "ai-playlist",
+                element: <AiPlaylistPage />
             },
             {
                 path: "playlists",
