@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "3": "^2.1.0",
+    "@google/genai": "^2.29.1",
     "@imagekit/nodejs": "^7.12.1",
     "@mediapipe/tasks-vision": "^1.0.1",
     "bcryptjs": "^3.0.3",

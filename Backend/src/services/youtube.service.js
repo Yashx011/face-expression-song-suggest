@@ -1,4 +1,4 @@
-async function searchVideos(query) {
+async function searchVideos(query, options = {}) {
   if (!query || !query.trim()) {
     return [];
   }
@@ -8,7 +8,8 @@ async function searchVideos(query) {
     throw new Error("YOUTUBE_API_KEY missing in environment");
   }
 
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=5&q=${encodeURIComponent(query.trim())}&key=${apiKey}`;
+  const maxResults = Math.min(Math.max(parseInt(options.maxResults, 10) || 10, 1), 25);
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=${maxResults}&q=${encodeURIComponent(query.trim())}&key=${apiKey}`;
 
   const response = await fetch(url);
   if (!response.ok) {

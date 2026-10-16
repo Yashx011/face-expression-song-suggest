@@ -24,6 +24,12 @@ const IconLibrary = () => (
   </svg>
 );
 
+const IconSparkles = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
+  </svg>
+);
+
 const IconUser = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -96,6 +102,15 @@ export default function Navbar() {
             <span className="nav-label">Library</span>
           </NavLink>
 
+          <NavLink
+            to="/ai-playlist"
+            className={({ isActive }) => `nav-btn ${isActive ? "active" : ""}`}
+            title="AI Playlist"
+          >
+            <IconSparkles />
+            <span className="nav-label">AI Playlist</span>
+          </NavLink>
+
           {/* USER PROFILE AVATAR BUTTON */}
           {user && (
             <button
@@ -161,6 +176,14 @@ export default function Navbar() {
                 onClick={closeDrawer}
               >
                 <span>🎶 Playlists</span>
+              </NavLink>
+
+              <NavLink
+                to="/ai-playlist"
+                className={({ isActive }) => `drawer-link ${isActive ? "active" : ""}`}
+                onClick={closeDrawer}
+              >
+                <span>✨ AI Playlist</span>
               </NavLink>
 
               <NavLink

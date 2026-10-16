@@ -158,7 +158,7 @@ export default function FavoritesPage() {
               </div>
             );
           })}
-        </div>
+          </div>
       )}
     </div>
   );
